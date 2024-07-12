@@ -1,0 +1,95 @@
+---
+title: "ST 558 HW5: Non-linear modeling"
+author: "Chris Aguilar"
+format: html
+editor: visual
+---
+
+## Introduction
+
+We'll look at some machine learning modeling concepts and then practice using some methods.
+
+## Task 1: Conceptual Questions
+
+1.  What is the purpose of using cross-validation when fitting a random forest model?
+
+  > We use cross-validation (CV) primarily to prevent overfitting. In the context of fitting a random forest model, we use it to determine the best hyperparameters given the data.
+
+2.  Describe the bagged tree algorithm.
+
+  > This algorithm uses the standard classification and regression tree, which splits the predictor space up such that finds cut points that minimize some loss function of interest, and ultimately makes predictions consisting of the average response value for a terminal node for a numeric outcome, or the majority vote for a categorical outcome. The extra part added is bootstrap resampling to create many resamples, fitting a tree and creating predictions for each observation, then averaging these or taking the most common prediction for categorical outcomes.
+
+3. What is meant by a general linear model?
+
+  > This is a linear model with a continuous response that allows both continuous and categorical predictors.
+  
+4. When fitting a multiple linear regression model, what does adding an interaction term do? That is,
+what does it allow the model to do differently as compared to when it is not included in the model?
+
+  > Interaction terms allow us to capture the change in effect from a predictor on a response in the presence of another predictor. They allow models to capture a multiplicative effect instead of the additive effect provided by standalone predictors, changing the slopes of the models for each value of another predictor.
+  
+5. Why do we split our data into a training and test set?
+
+  > To prevent overfitting by checking out model's prediction ability can generalize to unseen data, the test set instead of relying on the training set, which can produce overoptimisic results.
+  
+## Task 2: Fitting models.
+
+We now practice fitting some models using the `caret` package.
+
+We'll read in data, drop `ST_Slope` create a heart disease factor variable, do some quick EDA, then preprocess for kNN modeling.
+  
+### Ingest data, data cleaning, EDA, preprocess
+
+```{r eda}
+
+library(readr)
+library(dplyr)
+library(GGally)
+
+heart_disease <- read_csv("https://www4.stat.ncsu.edu/~online/datasets/heart.csv") |> 
+  mutate(across(where(is.character), factor)) |>
+  mutate(HeartDisease = ifelse(HeartDisease == 1, "yes", "no") |> factor()) |> # heart disease factor var
+  select(-ST_Slope) # drop ST_Slope
+
+#### EDA
+# check missingness
+heart_disease |> is.na() |> colSums() # no NAs
+
+summary(heart_disease) # cholesterol and resting bp have values of 0
+
+# checking summaries by heart disease level
+heart_disease |>
+  select(HeartDisease, where(is.numeric)) |>
+  ggpairs()
+
+# heart disease and categorical
+heart_disease |>
+  select(HeartDisease, where(is.factor)) |> 
+  ggpairs()
+```
+
+Now, we create dummy variables for kNN.
+
+```{r dummies}
+
+library(caret)
+
+heart_disease_dummies <- dummyVars(~ . - HeartDisease, data = heart_disease) |> 
+  predict(heart_disease) |> 
+  bind_cols(heart_disease |> select(HeartDisease))
+
+```
+
+### Splitting Data
+
+We now split our data.
+
+```{r}
+
+train_test_split <- createDataPartition(heart_disease_dummies$HeartDisease, p = 0.8, list = FALSE)
+
+heart_train <- heart_disease_dummies[train_test_split,]
+heart_test <- heart_disease_dummies[-train_test_split,]
+```
+
+
