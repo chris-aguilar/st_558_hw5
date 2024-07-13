@@ -13,31 +13,30 @@ We'll look at some machine learning modeling concepts and then practice using so
 
 1.  What is the purpose of using cross-validation when fitting a random forest model?
 
-  > We use cross-validation (CV) primarily to prevent overfitting. In the context of fitting a random forest model, we use it to determine the best hyperparameters given the data.
+> We use cross-validation (CV) primarily to prevent overfitting. In the context of fitting a random forest model, we use it to determine the best hyperparameters given the data.
 
 2.  Describe the bagged tree algorithm.
 
-  > This algorithm uses the standard classification and regression tree, which splits the predictor space up such that finds cut points that minimize some loss function of interest, and ultimately makes predictions consisting of the average response value for a terminal node for a numeric outcome, or the majority vote for a categorical outcome. The extra part added is bootstrap resampling to create many resamples, fitting a tree and creating predictions for each observation, then averaging these or taking the most common prediction for categorical outcomes.
+> This algorithm uses the standard classification and regression tree. First, it splits the predictor space up to look for cut points that minimize some loss function of interest. It does this repeatedly until the minimization is not useful. Ultimately, predictions consisting of the average response value for a terminal node for a numeric outcome, or the majority vote for a categorical outcome are made. The extra part added is bootstrap resampling to create many resamples, fitting a tree for each resample and creating predictions for each observation, then averaging these for numeric outcomes or taking the most common prediction for categorical outcomes. This averaging improves prediction accuracy at the cost of interpretability.
 
-3. What is meant by a general linear model?
+3.  What is meant by a general linear model?
 
-  > This is a linear model with a continuous response that allows both continuous and categorical predictors.
-  
-4. When fitting a multiple linear regression model, what does adding an interaction term do? That is,
-what does it allow the model to do differently as compared to when it is not included in the model?
+> This is a linear model with a continuous response that allows both continuous and categorical predictors.
 
-  > Interaction terms allow us to capture the change in effect from a predictor on a response in the presence of another predictor. They allow models to capture a multiplicative effect instead of the additive effect provided by standalone predictors, changing the slopes of the models for each value of another predictor.
-  
-5. Why do we split our data into a training and test set?
+4.  When fitting a multiple linear regression model, what does adding an interaction term do? That is, what does it allow the model to do differently as compared to when it is not included in the model?
 
-  > To prevent overfitting by checking out model's prediction ability can generalize to unseen data, the test set instead of relying on the training set, which can produce overoptimisic results.
-  
+> Interaction terms allow us to capture the change in effect from a predictor on a response in the presence of another predictor. They allow models to capture a multiplicative effect instead of only the additive effect provided by standalone predictors, changing the slopes of the models for each value of another predictor.
+
+5.  Why do we split our data into a training and test set?
+
+> To prevent overfitting by confirming our model's prediction ability can generalize to unseen data, the test set, instead of only relying on the training set, which can produce overly optimisic results.
+
 ## Task 2: Fitting models.
 
 We now practice fitting some models using the `caret` package.
 
 We'll read in data, drop `ST_Slope` create a heart disease factor variable, do some quick EDA, then preprocess for kNN modeling.
-  
+
 ### Ingest data, data cleaning, EDA, preprocess
 
 ```{r eda}
@@ -48,10 +47,14 @@ library(GGally)
 
 heart_disease <- read_csv("https://www4.stat.ncsu.edu/~online/datasets/heart.csv") |> 
   mutate(across(where(is.character), factor)) |>
-  mutate(HeartDisease = ifelse(HeartDisease == 1, "yes", "no") |> factor()) |> # heart disease factor var
+  mutate(HeartDisease = ifelse(HeartDisease == 1, "yes", "no") |> factor(levels = c("yes", "no"))) |> # heart disease factor var
   select(-ST_Slope) # drop ST_Slope
 
 #### EDA
+
+# Look at heart disease rates to get an idea of the no-information rate a model must beat
+table(heart_disease$HeartDisease) |> prop.table() # guessing majority class means we're right 55% of the time
+
 # check missingness
 heart_disease |> is.na() |> colSums() # no NAs
 
@@ -84,12 +87,178 @@ heart_disease_dummies <- dummyVars(~ . - HeartDisease, data = heart_disease) |>
 
 We now split our data.
 
-```{r}
+```{r data split}
 
+set.seed(1312)
 train_test_split <- createDataPartition(heart_disease_dummies$HeartDisease, p = 0.8, list = FALSE)
 
 heart_train <- heart_disease_dummies[train_test_split,]
 heart_test <- heart_disease_dummies[-train_test_split,]
 ```
 
+### kNN Fit
 
+We now fit several kNN models and do some cross-validation using `train()` from the `caret` package. We subsequently check performance with `confusionMatrix()`.
+
+```{r knn}
+# setting cv options
+train_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+# training knn models
+set.seed(1312)
+knn_fit <- train(HeartDisease ~., data = heart_train, method = "knn",
+ trControl=train_ctrl,
+ preProcess = c("center", "scale"),
+ tuneGrid = data.frame(k = 1:40))
+
+# test predictions
+test_pred <- predict(knn_fit, heart_test)
+
+confusionMatrix(test_pred, heart_test$HeartDisease)
+```
+
+The kNN model with `{r} knn_fit$bestTune` neighbors performs best here, attaining 84% accuracy compared to a No Information Rate of 55%.
+
+### Logistic Regression
+
+Next we'll fit three logistic regression models. Typically, age and sex seem to be sensible predictors based on medical studies and our EDA above. We can then add cholesterol as we always heart about how bad high cholesterol is for our health. Lastly we can use all predictors.
+
+We'll do another train/test split though because we don't need to manually create dummy variables and we'll run into issues if we use the dummy variable method that keeps a column for every variable.
+
+Once we train the three models, we'll compare them to see which one we select for test set evaluation.
+
+```{r logistic reg}
+set.seed(477)
+train_split_logreg <- createDataPartition(heart_disease$HeartDisease, p = .8, list = FALSE)
+
+heart_train_logreg <- heart_disease[train_split_logreg,]
+heart_test_logreg <- heart_disease[-train_split_logreg,]
+
+# basic logreg fit
+logreg_fit1 <- train(HeartDisease ~ Age + Sex, 
+                     data = heart_train_logreg,
+                     method = "glm",
+                     trControl = train_ctrl,
+                     family = "binomial")
+
+# adding cholesterol
+logreg_fit2 <- train(HeartDisease ~ Age + Sex + Cholesterol, 
+                     data = heart_train_logreg,
+                     method = "glm",
+                     trControl = train_ctrl,
+                     family = "binomial")
+
+# all predictors
+logreg_fit3 <- train(HeartDisease ~ ., 
+                     data = heart_train_logreg,
+                     method = "glm",
+                     trControl = train_ctrl,
+                     family = "binomial")
+
+# comparing models
+results <- resamples(list(age_sex = logreg_fit1, age_sex_chol = logreg_fit2, all_vars = logreg_fit3))
+
+bwplot(results)
+```
+
+CV results point to the logistic regression model with all predictors doing best. So we'll use that specification for model summary and our test set evaluation. Note: we set `HeartDisease`'s reference level to **"yes"** so the negative coefficients point toward predictors that are associated with a higher heart disease risk.
+
+
+```{r logreg test eval}
+
+summary(logreg_fit3)
+logreg_preds <- predict(logreg_fit3, heart_test_logreg)
+
+confusionMatrix(logreg_preds, heart_test_logreg$HeartDisease)
+```
+Our best logistic regression model gets about 80% accuracy on the test set compared to a NIR of 55%. Pretty good!
+
+### Tree fits
+
+Now we'll train three different sets of tree models:
+
+  1. Classification trees using `rpart`
+  2. Random forests using `rf`
+  3. Boosted trees using `gbm`
+
+I personally prefer using the `ranger` package for random forests due to speed (C++ under the hood) and `lightgbm` for boosted trees due to speed/higher memory efficiency!
+
+Since trees do implicit variable selection, I'm just going to use the entire predictor set for the same data used to train the logistic regression models. We'll create three different `data.frame`s to specify tuning grids for each algorithm.
+
+As before, we'll compare model performances visually.
+
+```{r trees}
+
+set.seed(123)
+# tuning grids
+rpart_grid <- data.frame(cp = seq(0, .1, by = 0.001))
+rf_grid <- data.frame(mtry = 1:ncol(heart_train_logreg))
+gbm_grid <- expand.grid(
+  n.trees = c(25, 50, 100, 200),
+  interaction.depth = 1:3,
+  shrinkage = 0.1,
+  n.minobsinnode = 10
+)
+
+# tree fits
+rpart_fit <- train(HeartDisease ~ ., 
+                   data = heart_train_logreg,
+                   method = 'rpart',
+                   trControl = train_ctrl,
+                   tuneGrid = rpart_grid)
+
+rf_fit <- train(HeartDisease ~ ., 
+                   data = heart_train_logreg,
+                   method = 'rf',
+                   trControl = train_ctrl,
+                   tuneGrid = rf_grid)
+
+# verbose = FALSE to prevent console output from being too cluttered
+gbm_fit <- train(HeartDisease ~ ., 
+                   data = heart_train_logreg,
+                   method = 'gbm',
+                   trControl = train_ctrl,
+                   tuneGrid = gbm_grid,
+                   verbose = FALSE)
+
+tree_results <- resamples(list(rpart = rpart_fit, rf = rf_fit, gbm = gbm_fit))
+bwplot(tree_results)
+```
+
+All the models do pretty well and perform close to each other so we'll evaluate all three on the test set.
+
+First, let's grab the test set predictions for each model. Then we'll look at each confusion matrix separately.
+
+
+```{r tree eval}
+rpart_preds <- predict(rpart_fit, heart_test_logreg)
+rf_preds <- predict(rf_fit, heart_test_logreg)
+gbm_preds <- predict(gbm_fit, heart_test_logreg)
+
+```
+
+#### Classification tree performance
+
+```{r rpart eval}
+# rpart confusion matrix
+confusionMatrix(rpart_preds, heart_test_logreg$HeartDisease)
+
+```
+
+#### Random forest performance
+
+```{r rf eval}
+confusionMatrix(rf_preds, heart_test_logreg$HeartDisease)
+
+```
+
+#### Gradient boosting performance
+```{r gbm eval}
+confusionMatrix(gbm_preds, heart_test_logreg$HeartDisease)
+```
+
+The test set results for our tree models show that **random forest** has the best accuracy given this data, with an optimal `mtry` hyperparameter value of `{r} rf_fit$bestTune`.
+
+### Wrap up
+
+Based on the test set evaluation results, the **random forest** model predicts at 85% accuracy, beating the other models.
