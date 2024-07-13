@@ -257,8 +257,8 @@ confusionMatrix(rf_preds, heart_test_logreg$HeartDisease)
 confusionMatrix(gbm_preds, heart_test_logreg$HeartDisease)
 ```
 
-The test set results for our tree models show that **random forest** has the best accuracy given this data, with an optimal `mtry` hyperparameter value of `{r} rf_fit$bestTune`.
+The test set results for our tree models show that **gbm** has the best accuracy given this data.
 
 ### Wrap up
 
-Based on the test set evaluation results, the **random forest** model predicts at 85% accuracy, beating the other models.
+Based on the test set evaluation results, the **gbm** model predicts at 86.89% accuracy, beating the other models.
